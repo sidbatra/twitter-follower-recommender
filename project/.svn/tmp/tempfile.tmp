@@ -1,0 +1,19 @@
+#!/usr/bin/ruby
+
+require 'time'
+
+STDIN.each_line do |line|
+	if line == "\n" 
+			break
+	end
+end
+
+STDIN.each_line do |line|
+		begin
+		    time=Time.parse(line[2..-1].chop)
+			puts STDIN.gets.chop[21..-1]+"\t"+STDIN.gets.chop[2..-1]+"\t"+"#{time.wday}"+"\t"+"#{time.hour/6}"
+            STDIN.gets
+		rescue
+			break;	
+		end
+end

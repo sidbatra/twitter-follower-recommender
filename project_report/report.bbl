@@ -1,0 +1,29 @@
+\begin{thebibliography}{1}\itemsep=-1pt
+
+\bibitem{twitter}
+Twitter.
+\newblock Twitter About Us. 
+\newblock {\em http://twitter.com/about}.
+
+\bibitem{ebay}
+E.~Schonfeld.
+\newblock On eBay, Twitter Followers Are Worth Less Than A Penny Each.
+\newblock {\em http://techcrunch.com/2010/01/31/twitter-followers-ebay-penny/, 2010}.
+
+\bibitem{mahal}
+P.~Mahalanobis.
+\newblock On the generalised distance in statistics.
+\newblock {\em Proceedings of the National Institute of Sciences of India 2 (1): 49.55, 1936}.
+
+\bibitem{api}
+Twitter.
+\newblock Twitter API.
+\newblock {\em http://apiwiki.twitter.com/}.
+
+\bibitem{kl}
+Kullback, S.~Leibler.
+On Information and Sufficiency".
+\newblock On Information and Sufficiency
+\newblock {\em Annals of Mathematical Statistics 22 (1): 79.86.}.
+
+\end{thebibliography}

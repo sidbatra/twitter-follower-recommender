@@ -1,0 +1,28 @@
+8
+
+dir
+49
+svn+ssh://sidbatra@robo.stanford.edu/afs/cs/u/sidbatra/secure/svn/cs345a/trunk/hive/.meta
+svn+ssh://sidbatra@robo.stanford.edu/afs/cs/u/sidbatra/secure/svn/cs345a/trunk
+
+
+
+2010-03-08T23:31:35.259835Z
+3
+sidbatra
+
+
+svn:special svn:externals svn:needs-lock
+
+eventId
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+64e41dfcfa746a0a818c36012aef71db
+2010-03-08T23:31:35.259835Z
+3
+sidbatra
+

@@ -1,0 +1,29 @@
+8
+
+dir
+6
+file:///secure/svn/cs345a/trunk/hive/elastic-mapreduce-ruby/uuidtools
+file:///secure/svn/cs345a/trunk
+
+
+
+2010-03-08T05:45:25.661783Z
+6
+sid
+
+
+svn:special svn:externals svn:needs-lock
+
+version.rb
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+677dd49fc8d5b6097e7ef55dd1359f00
+2010-03-08T05:45:25.661783Z
+6
+sid
+has-props
+

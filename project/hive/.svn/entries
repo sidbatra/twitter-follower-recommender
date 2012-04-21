@@ -1,0 +1,67 @@
+8
+
+dir
+49
+svn+ssh://sidbatra@robo.stanford.edu/afs/cs/u/sidbatra/secure/svn/cs345a/trunk/hive
+svn+ssh://sidbatra@robo.stanford.edu/afs/cs/u/sidbatra/secure/svn/cs345a/trunk
+
+
+
+2010-03-08T23:31:35.259835Z
+3
+sidbatra
+
+
+svn:special svn:externals svn:needs-lock
+
+tokenize.py
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+e2f9421b172f1192f421ab294bff9a92
+2010-03-08T23:31:35.259835Z
+3
+sidbatra
+
+.meta
+dir
+
+default.pem
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+0e45899e96f5d810033ffa6e51fcf7f4
+2010-03-08T23:31:35.259835Z
+3
+sidbatra
+
+defaultwest.pem
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+92dea97dc84b1f70f32b8d6984d2042c
+2010-03-08T23:31:35.259835Z
+3
+sidbatra
+
+creds.txt
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+5de6e9a6339f47f4346e40d093223479
+2010-03-08T23:31:35.259835Z
+3
+sidbatra
+

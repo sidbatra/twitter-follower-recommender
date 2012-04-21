@@ -1,0 +1,75 @@
+#!/opt/third-party/bin/perl -w
+# Does the standard 'configure, make, make install' for a third party package
+
+=head1 EXAMPLE
+
+customThirdPartyBuild --buildDir=.../build/private/FLAVOR/Zlib/build --installDir=.../build/private/FLAVOR/Zlib/install --flavor=DEV.STD.PTHREAD --configOptions="CXX=g++" --requiredMakeVar=ZLIB_BASE=/workplace/Zlib-mainline/build
+
+The package's configure will be called as such
+$buildDir/configure --prefix=$installDir CXX=g++
+
+This script will then finish off the build by calling 'make' and 'make install'
+
+Brazil make variables specified in the 'required-make-variables'
+section of the package Config file can be accessed through 
+the $brazilMakeVars hash reference in the form:
+$brazilMakeVars->{BRAZIL_VARIABLE_NAME}
+
+=cut
+
+use strict;
+use Getopt::Long;
+
+my $buildDir       = "";  #path to our private build directory
+my $installDir     = "";  #path to our private install directory
+my $flavor         = "";  #flavor we're building
+my $configArgs     = "";  #additional arguments to pass to configure
+my $brazilMakeVars = {};  #Brazil make variables declared in Config file
+
+GetOptions(
+           "buildDir=s"         => \$buildDir,
+           "installDir=s"       => \$installDir,
+           "flavor:s"           => \$flavor,
+           "configOptions:s"    => \$configArgs,
+           "requiredMakeVar:s%" =>  $brazilMakeVars
+          ) || die 'usage: --buildDir --installDir [--flavor] ' . 
+                   '[--configOptions] [--requiredMakeVar]';
+
+
+print "building module in $buildDir\n";
+
+chdir $buildDir;
+
+my $configure = './Configure';
+#some use a lower case 'c' on configure
+if ((! -x $configure) && (-x './configure'))
+{
+  $configure = './configure';
+}
+
+#strip out any prefix that might be in configArgs
+$configArgs =~ s/.*(--prefix=\B).*//;
+
+$configArgs = "--prefix=$installDir $configArgs";
+
+#
+# If JAVA_BASE is set, it means that the package has a dependency on java
+# and we need to add the java compiler to the path so configure can find it.
+# We want to use JAVA_BASE since it is unique to the Brazil build system.
+# Testing for JAVA_HOME or JAVAHOME would be incorrect, since java developers
+# might have set these independant of the build system. We want configure to
+# fail if it needs java and a dependency on java hasn't been set.
+#
+if ( $ENV{"JAVA_BASE"} ) {
+  $ENV{"PATH"} = $ENV{"JAVA_BASE"} . "/bin:" . $ENV{"PATH"};
+  $ENV{"CLASSPATH"} = $ENV{"BRAZIL_CLASSPATH"} . ":.:" . $buildDir;
+#  $ENV{"MAKEFILES"} = "";
+  
+}
+
+
+#run the build
+(! system "$configure $configArgs") or die;
+(! system "make") or die;
+(! system "make install") or die;
+

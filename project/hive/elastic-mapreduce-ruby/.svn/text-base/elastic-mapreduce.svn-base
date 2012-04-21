@@ -1,0 +1,908 @@
+#!/usr/bin/env ruby
+#
+# Copyright 2008-2009 Amazon.com, Inc. or its affiliates.  All Rights Reserved.
+
+$LOAD_PATH << File.dirname(__FILE__)
+
+require 'amazon/coral/elasticmapreduceclient'
+require 'amazon/retry_delegator'
+require 'optparse'
+require 'set'
+require 'json'
+
+AMAZON_ELASTIC_MAP_REDUCE_CLIENT_VERSION = '$Date: 2009/09/16 $'
+VALID_METHODS = Set.new %w(DescribeJobFlows TerminateJobFlows RunJobFlow AddJobFlowSteps)
+
+class Hash
+  alias :/ :[]
+end
+
+class Array
+  alias :/ :[]
+end
+
+class NilClass
+  def /(key)
+    nil
+  end
+end
+
+class Set
+  def join(*args)
+    self.to_a.join(*args)
+  end
+end
+
+def argument_error_if_nil(value, message)
+  if value == nil then
+    raise ArgumentError, message
+  end
+end
+
+def trace_exception(options, e)
+  if options[:debug] then 
+    puts e.backtrace.join("\n")
+  end
+end
+
+def is_error_response(response)
+  response.key?('Error')
+end
+
+is_retryable_error_response = Proc.new do |response| 
+  if response == nil then
+    false
+  else
+    ret = false
+    if response['Error'] then 
+      # note: 'Timeout' is not retryable because the operation might have completed just the connection timed out
+      ret ||= ['InternalFailure', 'Throttling', 'ServiceUnavailable'].include?(response['Error']['Code'])
+    end
+    ret 
+  end
+end
+
+def parse_credentials(credentials, options)
+  conversions = [
+    # These first ones use an incorrect naming convenion, but we keep them around for
+    # backwards compatibility
+    [:aws_access_id, "access_id"],
+    [:aws_secret_key, "private_key"],
+    [:key_pair, "keypair"], 
+    [:key_pair_file, "keypair-file"], 
+    [:log_uri, "log_uri"], 
+    
+    # Now the current ones
+    [:aws_access_id, "access-id"],
+    [:aws_secret_key, "private-key"],
+    [:key_pair, "key-pair"], 
+    [:key_pair_file, "key-pair-file"], 
+    [:log_uri, "log-uri"], 
+    [:endpoint, "endpoint"], 
+    [:region, "region"], 
+  ]
+
+  candidates = [credentials, ENV['ELASTIC_MAPREDUCE_CREDENTIALS'], File.join(File.dirname(__FILE__), credentials)]
+  filename   = candidates.find { |fname| File.exist?(fname) if fname }
+  if filename == nil then
+    raise RuntimeError, "Couldn't find a credentials file after searching for: #{candidates.join(", ")}"
+  end
+  
+  begin
+    credentials_hash = JSON.parse(File.read(filename))
+    for option_key, credentials_key in conversions do
+      if credentials_hash[credentials_key] && !options[option_key] then
+        options[option_key] = credentials_hash[credentials_key]
+      end
+    end
+  rescue Exception => e
+    raise ArgumentError, "Unable to parse #{filename}: #{e.message}"
+  end
+  
+  argument_error_if_nil(options[:aws_access_id], "Missing key access-id")
+  argument_error_if_nil(options[:aws_secret_key], "Missing key private-key")
+
+end
+
+def assert_not_matching(name, value, *patterns)
+  for pat in patterns do
+    if value.match(pat) then
+      raise RuntimeError, "Invalid argument for #{name}: '#{value}' is not a valid argument"
+    end
+  end
+end
+
+def assert_matching(name, value, *patterns)
+  for pat in patterns do
+    if value.match(pat) == nil then
+      raise RuntimeError, "Invalid argument for #{name}: '#{value}' is not a valid argument"
+    end
+  end
+end
+
+def check_for_error(message)
+  result = yield
+  if is_error_response(result) then
+    raise RuntimeError, (message + JSON.pretty_generate(result))
+  end
+  return result
+end
+
+
+options = {
+  :credentials => 'credentials.json'
+}
+
+begin
+  opts = OptionParser.new do |opts|
+
+    ##
+    ## Helper methods
+    ##
+    set_opt_flag = proc do | name, description, symbol | 
+      opts.on(name, description) do |create|
+        options[symbol] = true
+      end
+    end
+
+    set_opt_value = proc do | name, description, symbol |
+      opts.on(name, description) do |val|
+        assert_not_matching(name.split[0], val, /^--/)
+        options[symbol] = val
+      end
+    end
+
+    set_opt_value_with_short = proc do | shortname, name, description, symbol |
+      opts.on(shortname, name, description) do |val|
+        assert_not_matching(name.split[0], val, /^--/)
+        options[symbol] = val
+      end
+    end
+
+    set_opt_value_matching = proc do | name, description, symbol, match_criteria |
+      opts.on(name, description) do |val|
+        assert_not_matching(name.split[0], val, /^--/)
+        assert_matching(name.split[0], val, match_criteria)
+        options[symbol] = val
+      end
+    end
+
+    check_step_set = proc do | name, allowed_types |
+      allowed_with_str = allowed_types.map { |v| "--" + v }.join(" ")
+      if ! options[:steps] || ! options[:steps].last || ! allowed_types.include?(options[:steps].last[:type]) then
+        raise ArgumentError, name.split[0] + " must follow one of " + allowed_with_str
+      end
+    end
+
+    set_step_opt_value = proc do | name, description, symbol, allowed_types |
+      opts.on(name, description) do |val|
+        assert_not_matching(name.split[0], val, /^--/)
+        check_step_set.call(name, allowed_types)
+        
+        options[:steps].last[symbol] = val
+      end
+    end
+
+    set_step_opt_append = proc do | name, description, symbol, allowed_types |
+      opts.on(name, description) do |val|
+        assert_not_matching(name.split[0], val, /^--/)
+        check_step_set.call(name, allowed_types)
+        options[:steps].last[symbol] ||= []
+        options[:steps].last[symbol] << val
+      end
+    end
+
+
+    opts.separator "\n  Creating Job Flows\n"
+
+    set_opt_flag.call( "--create", "Create a new job flow", :create)
+    set_opt_value.call("--name NAME", "Name of the job flow", :name)
+    set_opt_flag.call("--alive", "Create a job flow that stays running even though it has executed all its steps", :alive)
+    set_opt_value_matching.call("--num-instances NUM", "Number of instances in the job flow", :num_instances, /^[0-9]+$/)
+    set_opt_value.call("--instance-type TYPE", "The type of the instances to launch", :instance_type)
+    set_opt_value.call("--slave-instance-type TYPE", "The type of the slave instances to launch", :slave_instance_type)
+    set_opt_value.call("--master-instance-type TYPE", "The type of the master instance to launch", :master_instance_type)
+    set_opt_value.call("--key-pair KEY_PAIR", "The name of your Amazon EC2 Keypair", :key_pair) 
+    set_opt_value.call("--key-pair-file FILE_PATH", "Path to your local pem file for your EC2 key pair", :key_pair_file) 
+    set_opt_value.call("--log-uri LOG_URI", "Location in S3 to store logs from the job flow, e.g. s3n://mybucket/logs", :log_uri)
+    set_opt_value.call("--availability-zone A_Z", "Specify the Availability Zone in which to launch the jobflow", :az)
+    set_opt_value.call("--info INFO", "Specify additional info in JSON", :ainfo)
+
+
+    opts.separator "\n  Adding Jar Steps to Job Flows\n"
+
+    opts.on("--jar JAR", "Add a step that executes a jar") do |jar|
+      assert_not_matching("--jar", jar, /^--/)
+      options[:steps] ||= []
+      options[:steps] << { :type => 'jar', :jar => jar }
+    end
+
+    set_step_opt_value.call("--main-class MAIN_CLASS", "Specify main class for the JAR", :main_class, ['jar'])
+
+
+    opts.separator "\n  Adding Streaming Steps to Job Flows\n"
+
+    opts.on("--stream", "Add a step that performs hadoop streaming") do
+      options[:steps] ||= []
+      options[:steps] << { :type => 'streaming' }
+    end
+
+    set_step_opt_value.call( "--input INPUT", "Input to the steps, e.g. s3n://mybucket/input", :input, ['streaming'])
+    set_step_opt_value.call( "--output OUTPUT", "The output to the steps, e.g. s3n://mybucket/output", :output, ['streaming'])
+    set_step_opt_value.call( "--mapper MAPPER", "The mapper program or class", :mapper, ['streaming'])
+    set_step_opt_append.call("--cache CACHE_FILE", "A file to load into the cache, e.g. s3n://mybucket/sample.py#sample.py", :cache, ['streaming'])
+    set_step_opt_append.call("--cache-archive CACHE_FILE", "A file to unpack into the cache, e.g. s3n://mybucket/sample.jar", :cache_archive, ['streaming'])
+    set_step_opt_value.call( "--reducer REDUCER", "The reducer program or class", :reducer, ['streaming'])
+
+    opts.on("--jobconf KEY=VALUE", "Specify jobconf arguments to pass to streaming") do |jobconf|
+      assert_not_matching("--jobconf", jobconf, /^--/)
+      check_step_set.call("--jobconf", ['streaming'])
+      assert_matching("--jobconf", jobconf, /=/)
+      step = options[:steps].last
+      step[:args] ||= []
+      step[:args] << "-jobconf"
+      step[:args] << jobconf
+    end
+
+
+    opts.separator "\n  Adding Pig steps to job flows\n"
+
+    opts.on("--pig-script", "Add a step that runs a Pig script") do
+      options[:steps] ||= []
+      options[:steps] << { :type => 'pig-script' }
+    end
+
+
+    opts.on("--pig-interactive", "Add a step that sets up the job flow for an interactive (via SSH) pig session") do
+      options[:steps] ||= []
+      options[:steps] << { :type => 'pig-interactive' }
+    end
+
+    opts.separator "\n  Configuring a Hive on a JobFlow\n"
+
+    opts.on("--hive-site HIVE_SITE", "Override Hive configuration with configuration from HIVE_SITE") do |site|
+      if ! site.match(/^s3n?:\/\//) then
+        raise RuntimeError, "Expected HIVE_SITE to be an s3 url, e.g. s3://mybucket/conf/mysite.xml"
+      end
+      options[:steps] ||= []
+      options[:steps] << { :type => 'hive-site', :site => site }
+    end
+
+    opts.on("--hive-script", "Add a step that runs a Hive script") do
+      options[:steps] ||= []
+      options[:steps] << { :type => 'hive-script' }
+    end
+
+    opts.on("--hive-interactive", "Add a step that sets up the job flow for an interactive (via SSH) hive session") do
+      options[:steps] ||= []
+      options[:steps] << { :type => 'hive-interactive' }
+    end
+
+    opts.separator "\n  Adding Steps from a Json File to Job Flows\n"
+
+    opts.on("--json FILE", "Add a sequence of steps stored in a json file") do |file|
+      options[:steps] ||= []
+      options[:steps] << { :type => 'json', :file => file }
+    end
+
+    opts.on("--param VARIABLE=VALUE", "subsitute <variable> with value in the json file") do |variable|
+      assert_not_matching("--variable", variable, /^--/)
+      if match = variable.match(/([^=]+)=(.*)/) then
+        if ! options[:steps] || ! options[:steps].last then
+          raise ArgumentError, "--param must follow either --jar or --stream"
+        end
+        options[:steps].last[:variables] ||= []
+        options[:steps].last[:variables] << [match[1], match[2]]
+      else
+        raise RuntimeError, "Expected '#{variable}' to be in the form VARIABLE=VALUE"
+      end
+    end
+
+    opts.separator "\n  Contacting the Master Node\n"
+
+    set_opt_flag.call( "--ssh",  "Open an SSH connection to the master node", :ssh)
+    set_opt_flag.call( "--logs", "Display the step logs for the last executed step", :step_logs)
+
+    opts.separator "\n  Settings common to all step types\n"
+
+    all_types = ['jar', 'streaming', 'pig-interactive', 'pig-script', 'hive-interactive', 'hive-script']
+    set_step_opt_value.call( "--step-name STEP_NAME", "Set name for the step", :step_name, all_types)
+    set_step_opt_value.call( "--step-action STEP_NAME", "Action to take when step finishes. One of CANCEL_AND_WAIT, TERMINATE_JOB_FLOW or CONTINUE", :step_action, all_types)
+
+    opts.on("--arg ARG", "Specify an argument to a jar, streaming, pig-script or hive-script step") do |arg|
+      check_step_set.call("--arg", all_types)
+      step = options[:steps].last
+      step[:args] ||= []
+      step[:args] << arg
+    end
+
+    opts.on("--args ARGS", "Specify a comma seperated list of arguments, e.g --args 1,2,3 would three arguments") do |arg|
+      check_step_set.call("--args", all_types)
+      step = options[:steps].last
+      step[:args] ||= []
+      step[:args] += arg.split(",")
+    end
+    
+    opts.separator "\n  Listing and Describing Job Flows\n"
+
+    set_opt_flag.call("--list", "List all job flows created in the last 2 days", :list)
+    set_opt_flag.call("--describe", "Dump a JSON description of the supplied job flows", :describe)
+    set_opt_flag.call("--active", "List running, starting or shutting down job flows", :active)
+    set_opt_flag.call("--all", "List all job flows in the last 2 months", :all)
+    set_opt_flag.call("--nosteps", "Do not list steps when listing jobs", :nosteps)
+
+    opts.on("--state STATE", "List job flows in STATE") do |state|
+      assert_not_matching("--state", state, /^--/)
+      options[:states] ||= []
+      options[:states] << state.upcase
+    end
+
+    opts.on("-n MAX_RESULTS", "--max-results MAX_RESULTS", "Maximum number of results to list") do |max_results|
+      assert_matching("-n", max_results, /^[0-9]+$/)
+      options[:max_results] = max_results.to_i
+    end
+
+
+    opts.separator "\n  Terminating Job Flows\n"
+
+    set_opt_flag.call("--terminate", "Terminate the job flow", :terminate)
+
+
+    opts.separator "\n  Common Options\n"
+
+    opts.on("-j", "--jobflow JOB_FLOW_ID", "--job-flow-id JOB_FLOW_ID") do |job_flow| 
+      argument_error_if_nil(job_flow.match(/^j-[A-Z0-9]+$/),
+        "Job flow #{job_flow} is not in the expected format, expected something like j-ABAHAS0019121")
+      options[:job_flow_ids] ||= []
+      options[:job_flow_ids] << job_flow
+    end
+
+    set_opt_value_with_short.call("-c", "--credentials CRED_FILE", "File containing access-id and private-key", :credentials)
+    set_opt_value_with_short.call("-a", "--access-id ACCESS-ID", "AWS Access Id", :aws_access_id)
+    set_opt_value_with_short.call("-k", "--private-key PRIVATE-KEY", "AWS Private Key", :aws_secret_key)
+
+    opts.on("-v", "--verbose", "Turn on verbose logging of program interaction") do |verbose|
+      options[:verbose] = true
+    end
+
+
+    opts.separator "\n  Uncommon Options\n"
+
+    set_opt_flag.call( "--debug", "Print stack traces when exceptions occur", :debug)
+    set_opt_value.call("--endpoint ENDPOINT", "Specify the webservice endpoint to talk to", :endpoint)
+    set_opt_value.call("--region REGION", "The region to use for the endpoint", :region)
+    set_opt_value.call("--apps-path APPS_PATH", "Specify s3:// path to the base of the emr public bucket to use. e.g s3://us-east-1.elasticmapreduce", :apps_path)
+    
+    opts.on("--version", "Print a version string") do |version|
+      puts "Version: " + AMAZON_ELASTIC_MAP_REDUCE_CLIENT_VERSION
+      exit 0
+    end
+
+    opts.on_tail("-h", "--help", "Show help message") do
+      puts opts
+      exit
+    end
+
+  end
+  opts.parse!
+
+  if options[:aws_access_id] == nil || options[:aws_secret_key] == nil then
+    if options[:aws_access_id] == nil && options[:aws_secret_key] == nil then
+      parse_credentials(options[:credentials], options)
+    else
+      argument_error_if_nil(options[:aws_access_id],
+        "Missing access_id, you must supply either -a or -c argument, type --help for usage")
+      argument_error_if_nil(options[:aws_secret_key],
+                            "Missing secret_key, you must supply either -k or -c argument, type --help for usage")
+    end
+  end
+
+  options[:args] = ARGV.dup
+  
+  for arg in options[:args] do
+    if arg =~ /^j-\w{5,20}$/  then
+      options[:job_flow_ids] ||= []
+      options[:job_flow_ids] << arg
+    end
+  end
+
+  # check implications between arguments, note: the conclusions are disjunctive forms
+  #   premise -> or (conclusion)
+  implications = {
+    :alive         => :create,
+    :max_results   => :list,
+    :active        => [:list, :describe],
+    :nosteps       => :list,
+    :num_instances => :create,
+    :instance_type => :create,
+    :master_instance_type => :create,
+    :slave_instance_type => :create,
+    :steps         => [:create, :job_flow_ids],
+    :name          => :create,
+  }
+
+  # negated disjunctive implications of the form: 
+  #   premise -> not ( or (conclusion) )
+  exclusions = {
+    :all       => [:active, :states],
+    :list      => [:describe]
+  }
+
+  key_set = Set.new(options.keys)
+  for premise, conclusion in implications do
+    if options[premise] then
+      if conclusion.is_a?(Array) then
+        if key_set.intersection(Set.new(conclusion)).size == 0 then
+          raise ArgumentError, "Option #{premise.to_s} requires at least one of #{conclusion.join(", ")}."
+        end
+      else
+        if ! key_set.member?(conclusion) then
+          raise ArgumentError, "Option #{premise.to_s} requires the option #{conclusion}"
+        end
+      end
+    end
+  end
+
+  for premise, conclusion in exclusions do
+    if options[premise] then
+      if conclusion.is_a?(Array) then
+        if key_set.intersection(Set.new(conclusion)).size != 0 then
+          raise ArgumentError, "Option #{premise.to_s} may not be combined with #{conclusion.join(", ")}"
+        end
+      else
+        if key_set.member?(conclusion) then
+          raise ArgumentError, "Option #{premise.to_s} may not be combined with #{conclusion}"
+        end
+      end
+    end
+  end        
+
+  if options[:job_flow_ids] && options[:create] then
+    raise ArgumentError, "You cannot specify both --create and --job-flow-ids"
+  end
+
+rescue SystemExit => e
+  exit -1
+rescue Exception => e
+  puts "Error: #{e.message}"
+  trace_exception(options, e)
+  exit -1
+end
+
+if options[:region] then
+  if options[:endpoint] then
+    raise ArgumentError, "You cannot specify both --endpoint and --region"
+  end
+  
+  options[:endpoint] = "https://#{options[:region]}.elasticmapreduce.amazonaws.com"
+end
+
+if options[:endpoint] && !options[:apps_path] then
+  region = options[:endpoint].match("^http://(.*)\.elasticmapreduce") 
+  if region then
+    options[:apps_path] = "s3://#{region[1]}.elasticmapreduce"
+  end
+end
+options[:apps_path] ||= "s3://us-east-1.elasticmapreduce"
+options[:apps_path].chomp!("/")
+
+# Example showing how to initialize and call the client
+config = {
+  :endpoint            => options[:endpoint] || "https://elasticmapreduce.amazonaws.com",
+  :ca_file             => File.join(File.dirname(__FILE__), "cacert.pem"),
+  :aws_access_key      => options[:aws_access_id],
+  :aws_secret_key      => options[:aws_secret_key],
+  :signature_algorithm => :V2,
+  :verbose             => (options[:verbose] != nil)
+}
+
+client = Amazon::Coral::ElasticMapReduceClient.new_aws_query(config)
+
+# wrap the client in a retry Delegator that will retry on error responses
+client = Amazon::RetryDelegator.new(client, :retry_if => is_retryable_error_response)
+
+def format(map, *fields)
+  result = []
+  for field in fields do
+    key = field[0].split(".")
+    value = map
+    while key.size > 0 do
+      value = value[key.first]
+      key.shift
+    end
+    result << sprintf("%-#{field[1]}s", value)
+  end
+  result.join("")
+end
+
+begin
+  script_runner_path = "/libs/script-runner/script-runner.jar"
+  pig_path           = "#{options[:apps_path]}/libs/pig/0.3"
+  hive_path          = "#{options[:apps_path]}/libs/hive/0.4"
+
+  step_prototypes = {
+    "pig-interactive" => Proc.new do |step_options| 
+      step = {
+        "Name"            => step_options[:step_name] || "Setup Pig",
+        "ActionOnFailure" => step_options[:step_action] || "TERMINATE_JOB_FLOW",
+        "HadoopJarStep"   => {
+          "Jar" => "#{options[:apps_path]}#{script_runner_path}",
+          "Args" => [ "#{pig_path}/fetch" ] + (step_options[:args] || [])
+        }
+      }
+      [ step ]
+    end,
+
+    "pig-script" => Proc.new do |step_options| 
+      if !step_options[:args] || step_options[:args].size == 0 then
+        raise ArgumentError, "When using --pig-script, you must pass the script location in S3 using a --arg parameter."
+      end
+      
+      step = {
+        "Name"            => step_options[:step_name] || "Run Pig Script",
+        "ActionOnFailure" => step_options[:step_action] || "CANCEL_AND_WAIT",
+        "HadoopJarStep"   => {
+          "Jar" => "/home/hadoop/lib/pig/pig-0.3-amzn.jar",
+          "Args" => step_options[:args] || []
+        }
+      }
+      [ step ]
+    end,
+    
+    "hive-site" => Proc.new do |step_options| 
+      step = {
+        "Name"            => step_options[:step_name] || "Install Hive Site Configuration",
+        "ActionOnFailure" => step_options[:step_action] || "CANCEL_AND_WAIT",
+        "HadoopJarStep"   => {
+          "Jar" => "#{options[:apps_path]}#{script_runner_path}",
+          "Args" => [ "#{hive_path}/install-hive-site" , "--hive-site=#{step_options[:site]}" ] + 
+            (step_options[:args] || [])
+        }
+      }
+      [ step ]
+    end,
+
+    "hive-interactive" => Proc.new do |step_options| 
+      step = {
+        "Name"            => step_options[:step_name] || "Setup Hive",
+        "ActionOnFailure" => step_options[:step_action] || "TERMINATE_JOB_FLOW",
+        "HadoopJarStep"   => {
+          "Jar" => "#{options[:apps_path]}#{script_runner_path}",
+          "Args" => [ "#{hive_path}/install-hive" ] + (step_options[:args] || [])
+        }
+      }
+      [ step ]
+    end,
+
+    "hive-script" => Proc.new do |step_options| 
+      if !step_options[:args] || step_options[:args].size == 0 then
+        raise ArgumentError, "When using --hive-script, you must pass the script location in S3 using a --arg parameter."
+      end
+      
+      step = {
+        "Name"            => step_options[:step_name] || "Run Hive Script",
+        "ActionOnFailure" => step_options[:step_action] || "CANCEL_AND_WAIT",
+        "HadoopJarStep"   => {
+          "Jar" => "#{options[:apps_path]}#{script_runner_path}",
+          "Args" => [ "#{hive_path}/run-hive", "-f" ] + (step_options[:args] || [])
+        }
+      }
+      [ step ]
+    end,
+    
+    "streaming" => Proc.new do |step_options| 
+      if step_options[:mapper] == nil then
+        step_options[:mapper] = "s3n://elasticmapreduce/samples/wordcount/wordSplitter.py"
+      end
+      timestr = Time.now.strftime("%Y-%m-%dT%H%M%S")
+      cache_options = []
+      if step_options[:cache] then
+        for ca in step_options[:cache] do
+          cache_options << "-cacheFile" << ca
+        end
+      end
+      if step_options[:cache_archive] then
+        for ca in step_options[:cache_archive] do
+          cache_options << "-cacheArchive" << ca
+        end
+      end
+      step = {
+        "Name"            => step_options[:step_name] || "Example Streaming Step",
+        "ActionOnFailure" => step_options[:step_action] || "CANCEL_AND_WAIT",
+        "HadoopJarStep"   => {
+          "Jar" => "/home/hadoop/contrib/streaming/hadoop-0.18-streaming.jar",
+          "Args" => [
+            "-input",     step_options[:input]   || "s3n://elasticmapreduce/samples/wordcount/input",
+            "-output",    step_options[:output]  || "hdfs:///examples/output/#{timestr}",
+            "-mapper",    step_options[:mapper],
+            "-reducer",   step_options[:reducer] || "aggregate"
+          ] + (cache_options) + (step_options[:args] || [])
+        }
+      }
+      [ step ]
+    end,
+
+    "jar" => Proc.new do |step_options| 
+      step = {
+        "Name"            => step_options[:step_name] || "Example Jar Step",
+        "ActionOnFailure" => step_options[:step_action] || "CANCEL_AND_WAIT",
+        "HadoopJarStep"   => {
+          "Jar"  => step_options[:jar],
+          "Args" => step_options[:args] || []
+        }
+      }
+      step["HadoopJarStep"]["MainClass"] = step_options[:main_class] if step_options[:main_class]
+      [ step ]
+    end,
+
+    "json" => Proc.new do |step_options|
+      content = steps = nil
+      begin
+        content = File.read(step_options[:file])
+      rescue Exception => e
+        raise RuntimeError, "Couldn't read json file #{step_options[:file]}"
+      end
+      if step_options[:variables] then
+        for var, value in step_options[:variables] do
+          content.gsub!(var, value)
+        end
+      end
+      begin
+        steps = JSON.parse(content)
+      rescue Exception => e
+        raise RuntimeError, "Error parsing json from file #{step_options[:file]}"
+      end
+      if steps.is_a?(Array) then
+        steps
+      else
+        [ steps ]
+      end
+    end
+  }
+
+  # look to see if the jobflow has already had pig or hive installed
+  setup_pig = false
+  setup_hive = false
+  if ! options[:create] && options[:steps] then
+    if options[:job_flow_ids].size == 1 then
+      jobflow = check_for_error("Error listing job #{options[:job_flow_ids].join(", ")}: ") do
+        client.DescribeJobFlows('JobFlowIds' => options[:job_flow_ids])
+      end
+      jobflow_steps = jobflow / 'JobFlows' / 0 / 'Steps'
+      for jobflow_step in jobflow_steps do
+        step_config = jobflow_step / 'StepConfig' / 'HadoopJarStep' 
+        jar = step_config / 'Jar'
+        argument = step_config / 'Args' / 0
+        if jar == "#{options[:apps_path]}#{script_runner_path}" then
+          if argument == "#{hive_path}/install-hive" then
+            setup_hive = true
+          end
+        end
+        if jar == "#{options[:apps_path]}#{script_runner_path}" then
+          if argument == "#{pig_path}/fetch" then
+            setup_pig = true
+          end
+        end
+      end
+    end
+  end
+  
+  # apply the step prototypes
+  steps = []
+  if options[:steps] then
+    for step in options[:steps] do
+      proto = step_prototypes[step[:type]]
+      if ! proto then
+        raise ArgumentError, "There is no step type called #{step_name}"
+      else
+        if step[:type] == "pig-script" && !setup_pig then
+          setup_pig = true
+          steps += step_prototypes["pig-interactive"].call({})
+        elsif step[:type] == "hive-script" && !setup_hive then
+          setup_hive = true
+          steps += step_prototypes["hive-interactive"].call({})
+        elsif step[:type] == "hive-site" && !setup_hive then
+          setup_hive = true
+          steps += step_prototypes["hive-interactive"].call({})
+        elsif step[:type] == "pig-interactive" then
+          if options[:create] && !options[:key_pair] then
+            raise ArgumentError, "You need to set the --key_pair argument to do an interactive (SSH) Pig session."
+          end
+          if options[:create] && !options[:alive] then
+            raise ArgumentError, "You need to set the --alive argument to do an interactive (SSH) Pig session. The job flow will remain alive for your session and you then must terminate it."
+          end
+          setup_pig = true
+        elsif step[:type] == "hive-interactive" then
+          if options[:create] && !options[:key_pair] then
+            raise ArgumentError, "You need to set the --key_pair argument to do an interactive (SSH) Hive session."
+          end
+          if options[:create] && !options[:alive] then
+            raise ArgumentError, "You need to set the --alive argument to do an interactive (SSH) Hive session. The job flow will remain alive for your session and you then must terminate it."
+          end
+          setup_hive = true
+        end
+        
+        steps += proto.call(step)
+      end
+    end
+  end
+
+  default_job_flow_name = "Development Job Flow "
+  if options[:alive] then
+    default_job_flow_name += " (requires manual termination)"
+  end
+  job_flow = {
+    "Name"   => options[:name] || default_job_flow_name,
+    "Instances" => {
+      "SlaveInstanceType"           => options[:slave_instance_type] || options[:instance_type] || "m1.small",
+      "MasterInstanceType"          => options[:master_instance_type] || options[:instance_type] || "m1.small",
+      "InstanceCount"               => options[:num_instances] || "1",
+      "KeepJobFlowAliveWhenNoSteps" => (options[:alive] ? "true" : "false")
+    },
+    "Steps" => steps
+  }
+
+  if options[:ainfo] then
+    job_flow["AdditionalInfo"] = options[:ainfo]
+  end
+
+  if options[:key_pair] then
+    job_flow["Instances"]["Ec2KeyName"] = options[:key_pair]
+  end
+
+  if options[:az] then
+    job_flow["Instances"]["Placement"] ||= {}
+    job_flow["Instances"]["Placement"]["AvailabilityZone"] = options[:az]
+  end
+
+  if options[:log_uri] then
+    job_flow["LogUri"] = options[:log_uri]
+  end
+
+  if options[:debug] then
+    puts "jobflow=" + job_flow.inspect
+    puts "steps=" + steps.inspect
+  end
+  
+  if options[:create] then
+    result = client.RunJobFlow(job_flow)
+    if result && result.key?('JobFlowId') then
+      job_flow_id = result['JobFlowId']
+      options[:job_flow_ids] ||= []
+      options[:job_flow_ids] << job_flow_id 
+      puts "Created job flow " + job_flow_id
+    else
+      raise RuntimeError, "creating job flow: " + JSON.pretty_generate(result)
+    end
+  end
+
+  if options[:steps] && ! options[:create] then
+    if options[:job_flow_ids].size != 1 then
+      raise RuntimeError, "To call add steps you must specify either --create or exactly one job_flow_id"
+    end
+    job_flow_id = options[:job_flow_ids].first
+    result = client.AddJobFlowSteps('JobFlowId' => job_flow_id, 'Steps' => steps)
+    if result != nil then
+      raise RuntimeError, "Error adding steps: " + JSON.pretty_generate(result)
+    else
+      puts "Added steps to #{job_flow_id}"
+    end
+  end
+
+  result = nil
+  if options[:list] || options[:describe] then
+    if options[:job_flow_ids] && options[:job_flow_ids].size > 0 then
+      result = check_for_error("Error listing job #{options[:job_flow_ids].join(", ")}: ") do
+        client.DescribeJobFlows('JobFlowIds' => options[:job_flow_ids])
+      end
+    else
+      states = []
+      if options[:active] then
+        states = %w(RUNNING SHUTTING_DOWN STARTING WAITING)
+      end
+      if options[:states] then
+        states += options[:states]
+      end
+      if options[:active] || options[:states] then
+        result = client.DescribeJobFlows('JobFlowStates' => states)
+      elsif options[:all] then
+        result = client.DescribeJobFlows()
+      else
+        result = client.DescribeJobFlows('CreatedAfter' => (Time.now - (24 * 3600)).xmlschema)
+      end
+      if result.key?("JobFlows") then
+        options[:job_flow_ids] ||= []
+        options[:job_flow_ids] += result['JobFlows'].map { |x| x['JobFlowId'] }
+        options[:job_flow_ids].uniq!
+      else
+        raise RuntimeError, "Error listing jobs: " + JSON.pretty_generate(result)
+      end
+    end
+
+    if options[:list] then
+      job_flows = result['JobFlows']
+      count = 0
+      for job_flow in job_flows do 
+        if options[:max_results] && (count += 1) > options[:max_results] then
+          break
+        end
+        puts format(job_flow, ['JobFlowId', 20], ['ExecutionStatusDetail.State', 15], 
+                    ['Instances.MasterPublicDnsName', 50]) + job_flow['Name']
+        if ! options[:nosteps] then
+          for step in job_flow['Steps'] do
+            puts "   " + format(step, ['ExecutionStatusDetail.State', 15], ['StepConfig.Name', 30])
+          end
+        end
+      end
+    elsif options[:describe] then
+      puts JSON.pretty_generate(result)
+    end
+  end
+
+  if options[:terminate] then
+    if options[:job_flow_ids] == nil || options[:job_flow_ids].size == 0 then
+      raise RuntimeError, "You must specify job flow ids of job flows you wish to terminate"
+    end
+    result = client.TerminateJobFlows('JobFlowIds' => options[:job_flow_ids])
+    if result != nil then
+      raise RuntimeError, "Error terminating job: " + JSON.pretty_generate(result)
+    else
+      puts "Job #{options[:job_flow_ids].join(", ")} Terminated"
+    end
+  end
+
+  if options[:debug] then
+    puts "Keypair=" + options[:key_pair].inspect
+  end
+
+  if options[:step_logs] || options[:ssh] then
+    if options[:job_flow_ids] == nil || options[:job_flow_ids].size == 0 then
+      raise RuntimeError, "You must specify a job flow id to show the logs or ssh to the master"
+    end
+
+    result = check_for_error("Error listing job #{options[:job_flow_ids].join(", ")}: ") do
+      client.DescribeJobFlows('JobFlowIds' => options[:job_flow_ids])
+    end
+    
+    job_flows = result['JobFlows']
+    if options[:step_logs] then
+      for job_flow in job_flows do 
+        hostname = job_flow['Instances']['MasterPublicDnsName']
+        step_id = job_flow['Steps'].size
+        key_pair_file = options[:key_pair_file]
+        if key_pair_file == nil || key_pair_file.size == 0 then
+          raise RuntimeError, "You must supply a key-pair-file to run this command"
+        end
+        cmd = "ssh -i #{key_pair_file} hadoop@#{hostname} cat /mnt/var/log/hadoop/steps/#{step_id}/{syslog,stderr,stdout}"
+        puts cmd
+        system cmd
+      end
+    elsif options[:ssh] then
+      if job_flows.size != 1 then
+        raise RuntimeError, "Expected a single jobflow when performing ssh"
+      end
+      job_flow = job_flows.first
+      hostname = job_flow['Instances']['MasterPublicDnsName']
+      key_pair_file = options[:key_pair_file]
+      if key_pair_file == nil || key_pair_file.size == 0 then
+        raise RuntimeError, "You must supply a key-pair-file to run this command"
+      end
+      cmd = "ssh -i #{key_pair_file} hadoop@#{hostname}"
+      puts cmd
+      system cmd
+    end    
+  end
+ 
+
+  if Set.new(options.keys).intersection(Set.new([:terminate, :debug, :list, :steps, :create, :describe, :step_logs, :ssh])).size == 0 then
+    puts opts
+    exit 0
+  end
+
+rescue SystemExit => e
+  exit -1
+rescue Exception => e
+  puts "Error: #{e.message}"
+  trace_exception(options, e)
+  exit -1
+end

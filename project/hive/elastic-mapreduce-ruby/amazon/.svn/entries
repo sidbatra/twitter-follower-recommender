@@ -1,0 +1,43 @@
+8
+
+dir
+6
+file:///secure/svn/cs345a/trunk/hive/elastic-mapreduce-ruby/amazon
+file:///secure/svn/cs345a/trunk
+
+
+
+2010-03-08T05:45:25.661783Z
+6
+sid
+
+
+svn:special svn:externals svn:needs-lock
+
+coral
+dir
+
+stderr_logger.rb
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+63d3c14f6494873aec178f2c342de049
+2010-03-08T05:45:25.661783Z
+6
+sid
+
+retry_delegator.rb
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+1ee0f4d521f08717a474923d81faf31d
+2010-03-08T05:45:25.661783Z
+6
+sid
+

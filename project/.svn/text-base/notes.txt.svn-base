@@ -1,0 +1,62 @@
+
+-------------- main queries ------
+create external table hun (text string) row format delimited fields terminated by '\n' stored as textfile location '/user/hadoop/hun';
+create external table hun_user_map (user string,tweet string,w string,t string) row format delimited fields terminated by '\t' stored as textfile location '/user/hadoop/hun_user_map';
+create external table hun_users (user string,tweet string,w string) row format delimited fields terminated by '\t' stored as textfile location '/user/hadoop/hun_users';
+create external table hun_fvs (user string,text string,f string,w string) row format delimited fields terminated by '\t' stored as textfile location '/user/hadoop/hun_fvs';
+create external table hun_word_map (word string,user string,fv string) row format delimited fields terminated by '\t' stored as textfile location '/user/hadoop/hun_word_map';
+create external table hun_words (word string,user string,fv string) row format delimited fields terminated by '\t' stored as textfile location '/user/hadoop/hun_words';
+create external table hun_bucket_map (user string,users string,fvs string,dist string) row format delimited fields terminated by '\t' stored as textfile location '/user/hadoop/hun_bucket_map';
+create external table hun_buckets (user string,total int,users string,fvs string,dist string) row format delimited fields terminated by '\t' stored as textfile location '/user/hadoop/hun_buckets';
+create external table hun_graph (user string,users string,score double,fvs string) row format delimited fields terminated by '\t' stored as textfile location '/user/hadoop/hun_graph';
+create external table hun_if_map (word string) row format delimited fields terminated by '\t' stored as textfile location '/user/hadoop/hun_if_map';
+create external table hun_if (word string,total int) row format delimited fields terminated by '\t' stored as textfile location '/user/hadoop/hun_if';
+create external table hun_active_map (key string,w string) row format delimited fields terminated by '\t' stored as textfile location '/user/hadoop/hun_active_map';
+create external table hun_active (w string) row format delimited fields terminated by '\t' stored as textfile location '/user/hadoop/hun_active';
+create external table hun_special_map (w string) row format delimited fields terminated by '\t' stored as textfile location '/user/hadoop/hun_special_map';
+create external table hun_special (w string,total int) row format delimited fields terminated by '\t' stored as textfile location '/user/hadoop/hun_special';
+
+from(from hun map text using 'ruby m_create_users.rb' as user,tweet,w,t cluster by user) hun_user_map insert overwrite table hun_users reduce user,tweet,w,t using 'ruby r_create_users.rb' as user,tweet,w;
+insert overwrite table hun_fvs select transform(user,tweet,w) using 'ruby m_create_fvs.rb' AS user,text,f,w from hun_users;
+from(from hun_fvs map user,text,f,w using 'ruby m_create_words.rb' as word,user,fv cluster by word) hun_word_map insert overwrite table hun_words reduce word,user,fv using 'ruby r_create_words.rb' as word,user,fv;
+from(from hun_words map word,user,fv using 'ruby m_create_buckets.rb' as user,users,fvs cluster by user) hun_bucket_map insert overwrite table hun_buckets reduce user,users,fvs using 'ruby r_create_buckets.rb' as user,total,users,fvs,dist;
+insert overwrite table hun_graph select transform(user,users,fvs) using 'ruby m_create_graph.rb' AS user,users,score,fvs from hun_buckets;
+from(from hun_fvs map user,text,f,w using 'ruby m_create_if.rb' as word cluster by word) hun_if_map insert overwrite table hun_if reduce word,total using 'ruby r_create_if.rb' as word,total;
+from(from hun_fvs map w using 'ruby m_create_active.rb' as key,w distribute by key) hun_active_map insert overwrite table hun_active reduce key,w using 'ruby r_create_active.rb' as w;
+from(from hun_users map tweet using 'ruby m_create_special.rb' as w cluster by w) hun_special_map insert overwrite table hun_special reduce w using 'ruby r_create_special.rb' as w,total;
+
+---------------------------------
+
+load data local inpath '/home/hadoop/sample.txt.gz' into table sample ;
+
+ S3Object.store('test.txt.gz',open('/home/sid/cs345a/t.txt.gz'),'cs345a-group15/project/test',:access => :public_read)
+
+ gzip -d tweets2009-07.txt.gz
+ gzip tweets2009-07.txt
+
+
+----- hadoop -----
+ssh -i defaultwest.pem hadoop@
+ svn+ssh://sidbatra@robo.stanford.edu/afs/cs/u/sidbatra/secure/svn/cs345a/trunk
+
+ hadoop fs -mkdir hundred
+ hadoop fs -put hundred.txt.gz /user/hadoop/hundred
+
+LOAD DATA INPATH '/user/hadoop/t08.txt.gz' INTO TABLE test;
+
+
+---- twitter api ------
+
+curl -u batrasid:PASSWORD http://twitter.com/users/show/batrasid.json
+curl -u batrasid:PASSWORD http://twitter.com/friends/ids/batrasid.xml
+
+
+--- old hive queries -----------
+
+create external table test (text string) row format delimited fields terminated by '\n' location 's3://cs345a-group15/project/test';
+create external table t06 (text string) row format delimited fields terminated by '\n' location 's3://cs345a-group15/project/t06';
+create external table usermap (posted string,user string,text string) row format delimited fields terminated by '\t'; 
+create external table users (user string,text string) row format delimited fields terminated by '\t';
+
+from ( from test map text using 'ruby m_users.rb' as user,text cluster by user) usermap insert overwrite table users reduce user,text using 'ruby r_users.rb' as user,text;
+from ( from test1 map user,text using 'ruby m_users.rb' as user,text cluster by user) usermap insert overwrite table users reduce user,text using 'ruby r_users.rb' as user,text;

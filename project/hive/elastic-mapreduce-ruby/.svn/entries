@@ -1,0 +1,155 @@
+8
+
+dir
+6
+file:///secure/svn/cs345a/trunk/hive/elastic-mapreduce-ruby
+file:///secure/svn/cs345a/trunk
+
+
+
+2010-03-08T05:45:25.661783Z
+6
+sid
+
+
+svn:special svn:externals svn:needs-lock
+
+cacert.pem
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+0301046d701a272d167d68ff5b02e16c
+2010-03-08T05:45:25.661783Z
+6
+sid
+
+amazon
+dir
+
+uuidtools
+dir
+
+elastic-mapreduce
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+9f6498205dcfa231ddec94e3ef1dbf2d
+2010-03-08T05:45:25.661783Z
+6
+sid
+has-props
+
+uuidtools.rb
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+c613e9d6806ac4d782499e8ae13d40b0
+2010-03-08T05:45:25.661783Z
+6
+sid
+has-props
+
+README
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+3e4be48b03688bef9ca494574b5aae94
+2010-03-08T05:45:25.661783Z
+6
+sid
+
+NOTICE.txt
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+2987fef9b8b53ed9225c27d2ee11d686
+2010-03-08T05:45:25.661783Z
+6
+sid
+
+LICENSE.txt
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+78b7edbce5aadb088f4d149600d2f73b
+2010-03-08T05:45:25.661783Z
+6
+sid
+
+samples
+dir
+
+.meta
+dir
+
+credentials.json
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+523aeb6caf3dfec11424e76ba110c274
+2010-03-08T05:45:25.661783Z
+6
+sid
+
+customThirdPartyBuild
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+e54cf6177f89e71234152bed33a3e1c1
+2010-03-08T05:45:25.661783Z
+6
+sid
+has-props
+
+elastic-mapreduce-ruby.zip
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+8427418bf5cb837cf13239066d60efbe
+2010-03-08T05:45:25.661783Z
+6
+sid
+has-props
+
+json
+dir
+
+json.rb
+file
+
+
+
+
+2010-03-08T05:44:18.000000Z
+28b253b1cce7a902bdbf6d8cfe21126c
+2010-03-08T05:45:25.661783Z
+6
+sid
+

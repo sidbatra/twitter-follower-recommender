@@ -1,0 +1,211 @@
+\documentclass[letterpaper]{article}
+
+%\usepackage{times}
+\usepackage{epsfig}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{subfig}
+
+% Include other packages here, before hyperref.
+
+% If you comment hyperref and then uncomment it, you should delete
+% egpaper.aux before re-running latex.  (Or just hit 'q' on the first latex
+% run, let it finish, and you should be clear).
+%\usepackage[pagebackref=true,breaklinks=true,letterpaper=true,colorlinks,bookmarks=false]{hyperref}
+
+% Pages are numbered in submission mode, and unnumbered in camera-ready
+\begin{document}
+
+%%%%%%%%% TITLE
+\title{Challenge Problem 3 Solution{}}
+
+\author{Siddharth Batra}
+
+\maketitle
+
+
+%%%%%%%%% BODY TEXT
+\section{Decision Trees}
+\subsection{}
+\begin{align*}
+ &P(y|x) = P{_{l(x)}}^y(1-P_{l(x)})^{1-y} \\ 
+ &P(y|x) = \phi^y(1-\phi)^{1-y}
+\end{align*}
+
+\begin{align*}
+ &\alpha(T) = \prod_{i=1}^{m} P(y^i|x^i) \\
+ &\alpha(T) = \prod_{i=1}^{m}  \phi^{y^i}(1-\phi)^{1-{y^i}}  \\ \\
+ &\alpha_{\delta(l)}(T) = \prod_{i=1}^{m}  \phi^{y^i}(1-\phi)^{1-{y^i}} \\
+ &\alpha_{\delta(l)}(T) = \phi^{g}(1-\phi)^{m_{l}-g} \\ \\
+ &\textbf{where:}\\
+ &\phi = P_{l(x)} \\
+ &g \text{ is total good samples}\\
+ &m_{l} \text{ is total samples in } \delta(l)\\
+ &(x^i,y^i) \epsilon \delta(l)  \\
+\end{align*}
+
+Taking log and setting derivate to zero
+
+\begin{align*}
+ & \frac{\partial l_{\delta(l)}(T)}{\partial \phi} = \frac{g}{\phi} - \frac{m_{l}-g}{1-\phi} = 0\\
+& \phi =  P_{l(x)} = \frac{g}{m_{l}}
+\end{align*}
+
+\subsection{}
+
+The solution is inspired by Adaboosting
+and seeks to iteratively form a distribution over the samples which as the iterations
+progress gives more mass to samples that are harder to classify.
+\\
+\\
+This distribution will be used for sampling examples in the first part and the update
+rule for the distribution is the solution for the second part.
+
+\subsubsection{}
+
+
+\begin{align*}
+&(x^{(i)},y^{(i)}) \sim P_{W_{k}}
+\end{align*}
+
+\subsubsection{}
+
+\begin{align*}
+&W_{k+1}(j) = \frac{W_{k}(j)}{Z_{k}} \exp(-e_{b_{k}}y^{(j)}b_{k}(x^{'(j)}))\\\\
+&\textbf{where:}\\
+&Z_{k} \text{ is a normalization constant} \\
+\end{align*}
+
+
+Assuming labels +1 and -1 to make the math simpler, the above equation will
+give a smaller weight (0-1) to samples that are correct (-ve exponential) and
+will give a much larger weight (+ve exponential) to the mistakes while the
+current error of the classifier scales the weight according to the current
+performance.\\\\
+
+
+\section{Error bound for 1-nearest neighbour classifier}
+
+\subsection{}
+
+\begin{align*}
+&q(x) = p(Y=1|X=x)\\
+&q(x) = \frac{p(X=x|Y=1)P(Y=1)}{P(X=x)}\\
+&q(x) = \frac{p(X=x|Y=1)P(Y=1)}{P(X=x|Y=1)P(Y=1)+P(X=x|Y=0)P(Y=0)}\\
+&q(x) = \frac{P_{1}(x)\theta}{P_{1}(x)\theta+P_{0}(x)(1-\theta)}\\
+\end{align*}
+
+\subsection{}
+
+Probability of misclassification - 
+
+\begin{align*}
+&=P(X=x|Y=1)P(Y=0|X=x)+P(X=x|Y=0)P(Y=1|X=x)\\
+&=P(X=x|Y=1)(1-q(x))+P(X=x|Y=0)q(x)\\
+&=\frac{P(Y=1|X=x)P(X=x)}{P(Y=1)}(1-q(x))+\frac{P(Y=0|X=x)P(X=x)}{P(Y=0)}q(x)\\
+&=\frac{q(x)P(X=x)(1-q(x))}{\theta}+\frac{(1-q(x))P(X=x)q(x)}{1-\theta}\\
+&=\frac{q(x)(1-q(x))P(X=x)}{\theta(1-\theta)}\\
+\end{align*}
+
+\subsection{}
+
+Probability of misclassification - 
+
+\begin{align*}
+&=P(X=x|Y=0)P(X=x'|Y=1)+P(X=x|Y=1)P(X=x'|Y=0)\\
+&=\frac{(1-q(x))P(X=x)q(x')P(X=x')+q(x)P(X=x)(1-q(x'))P(X=x')}{P(Y=0)P(Y=1)}\\
+&=\frac{(1-q(x))P(X=x)q(x')P(X=x')+q(x)P(X=x)(1-q(x'))P(X=x')}{\theta(1-\theta)}\\
+&=P(X=x)P(X=x')\frac{(1-q(x))q(x')+q(x)(1-q(x'))}{\theta(1-\theta)}\\
+\end{align*}
+
+\subsection{}
+
+Probability of misclassification with infinite samples - 
+
+\begin{align*}
+&=P(X=x)P(X=x')\frac{(1-q(x))q(x)+q(x)(1-q(x))}{\theta(1-\theta)}\\
+&=2P(X=x)P(X=x')\frac{(1-q(x))q(x)}{\theta(1-\theta)}\\
+\end{align*}
+
+\subsection{}
+
+\begin{align*}
+&2P(X=x)P(X=x')\frac{(1-q(x))q(x)}{\theta(1-\theta)} < 2\frac{q(x)(1-q(x))P(X=x)}{\theta(1-\theta)}\\
+&2P(X=x') < 2\\\\
+&P(X=x') < 1\\\\
+&\textbf{which is true since the problem indirectly assumes:}\\
+&0 < P(X=x') < 1 \\
+\end{align*}
+
+\subsection{}
+
+In the non-asymptotic case the number of training examples is not enough
+for the label probability distributions for any test point and its nearest
+neighbour to be the same. So for a test point  $x'$ the distributions of $q(x')$ and
+$q(x)$ where $x$ is it's nearest neighbour are not the same, thereby invalidating the
+proof under this condition.
+
+
+\section{Hierarchical Clustering}
+
+The majority of the time complexity of Hierarchical Clustering is spent in maintaining
+the rule that at every time step the cluster centroids with the shortest distance must be 
+merged.\\\\
+Since this rule is relaxed the core idea of the solution is to use a LSH family for the
+Euclidean space to assert a probablistic notion of closeness rather than the deterministic
+notion that distance gives.
+
+\subsection{}
+
+1. Take $h$ hash functions to form a Euclidean family of functions and hash every point into
+a series of buckets with width $a$.\\\\2. Iteratively or randomly chose any bucket and merge 
+any two points in that bucket while removing redundant entries in the hash table.\\\\3. Hash the new cluster centroid using the $h$ hash functions and repeat.\\\\
+As the book states, two points which have a distance $ d >> a$ have a small chance of being hashed
+to the same bucket. More formally a Euclidean family is a $(a/2,2a,1/2,1/3)$ LSH family.\\\\
+Optionally, we can apply an AND construction with $r$ rows followed by an OR construction 
+with $b$ bands to amplify the family described above. 
+
+\subsection{}
+
+Complexity of (1) is $hn$ and complexity of (3) is $h$. Since the last two steps are 
+performed at most $n$ times and the first step is only performed once the overall complexity is $hn + hn = O(hn)$.
+This assumes that the complexity of (2) is negligible in comparison.\\\\ 
+For the amplified case the complexity of (1) is $hrbn$ and complexity of (3) is $hrb$. The
+overall complexity for this case becomes $hrbn + hrbn = O(hrbn)$
+
+\subsection{}
+
+The LSH Euclidean family can simply be swapped for a non-Euclidean family depending on
+which non-Euclidean distance metric is appropriate. For the more interesting issue of
+representing a cluster centroid, we can pick one of the points being clustered that is more
+representative of the cluster and delete the hash table entry of the other point.
+
+%\[ I = \text{an image from the set of images for class } c \]
+%\[ G_i^c = \text{set of ground truth bounding boxes for class } c \text{ on image } I \]
+%\[ P_i^c = \text{set of positive images for simulated sliding window } \]
+%\[ N_i^c = \text{set of negative images for simulated sliding window } \]
+%\[ S^c = \text{set of non-overlapping bounding box samples for image } I \]
+%\[ g^{(j)} , s^{(j)} \epsilon \{ x , y , w , h \} \]
+%\[ \mu_w = \text{empirical mean of widths for positive snippets } \]
+%\[ \mu_h = \text{empirical mean of heights for positive snippets } \]
+%\[ \Sigma_w = \text{empirical variance of widths for positive snippets}  \]
+%\[ \Sigma_h = \text{empirical variance of heights for positive snippets}  \]
+%\[\boldsymbol{P_i^c} = \{I({g^{(1)}}),I({g^{(2)}}),\ldots,I({g^{(n)}})\}\]
+%\[\boldsymbol{N_i^c} = \{I({s^{(1)}}),I({s^{(2)}}),\ldots,I({s^{(n)}})\}\]
+%\[ {s^{(j)}}(w) \sim Gaussian( \mu_w , \Sigma_w) \]
+%\[ {s^{(j)}}(h) \sim Gaussian( \mu_h , \Sigma_h) \]
+%\[ {s^{(j)}}(x) \sim Unif( 0 , I(w) ) \]
+%\[ {s^{(j)}}(y) \sim Unif( 0 , I(h) ) \]
+
+
+%-------------------------------------------------------------------------
+
+
+%\begin{equation} 
+%    {x_j^{(i)}} = {\arg \min}_{f \epsilon F} {||f - {d}^{(j)}||_2}^2 
+%    \label{eq:fv_bw}
+%\end{equation}
+
+
+\end{document}
